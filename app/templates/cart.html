@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+
+
+{% block content %}
+<h1 class="heading">Cart</h1>
+  {% if session['cart'] == {'cake':0, 'cookie':0, 'bread and bun':0, 'brownie':0, 'mooncake':0} %}
+  <br></br>
+     <p style="font-size: 25px;text-align: center;">Your cart is currently empty</p>
+  {% elif cartContents: %}
+      <p style="font-size: 25px;margin-left: 15%;">Your cart contains:</p>
+      <ul style="font-size: 25px;">
+        {% for courses in ['cake', 'cookie', 'bread and bun', 'brownie', 'mooncake'] %}
+         {% if cart[courses] >= 1 %}
+          <li style="margin-left: 35%;">{{cart[courses]}} {{courses}} course</li>
+          {% endif %}
+      {% endfor %}
+      <br>
+      <p><form  style="margin-left: 35%;" method=post action="{{url_for('clearCart')}}">
+        <input style="
+          appearance: auto;
+          user-select: none;
+          white-space: pre;
+          align-items: flex-start;
+          text-align: center;
+          cursor: default;
+          box-sizing: border-box;
+          background-color: buttonface;
+          color: buttontext;
+          padding: 1px 6px;
+          border-width: 1px;
+          border-style: outset;
+          border-color: buttonborder;
+          border-image: initial;width: 10em;  height: 3em;" 
+          type=submit name=submit value="Clear Cart"></form></p>
+          <br>
+        <p><form style="margin-left: 35%;" method=post action="{{url_for('checkout')}}">
+        <input style="
+        appearance: auto;
+        user-select: none;
+        white-space: pre;
+        align-items: flex-start;
+        text-align: center;
+        cursor: default;
+        box-sizing: border-box;
+        background-color: buttonface;
+        color: buttontext;
+        padding: 1px 6px;
+        border-width: 1px;
+        border-style: outset;
+        border-color: buttonborder;
+        border-image: initial;width: 10em;  height: 3em;" 
+        type=submit name=submit value="Checkout"></form></p>
+  {% endif %}
+</section>   
+  {% endblock %}

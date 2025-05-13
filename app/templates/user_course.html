@@ -1,0 +1,108 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div>
+  <style>
+    table, th, td {
+        border: 1px solid black;
+        border-collapse: collapse;
+        width: 65%;
+        text-align: center;
+        vertical-align: middle;
+        padding:7px;
+        border-spacing:20px;
+        font-family: Arial, Helvetica, sans-serif;
+    }
+    tr:hover {background-color:rgb(255, 177, 82)
+    }
+
+    table {
+      background-color: #ffdda3;
+    }
+
+    tr:nth-child(1) {
+      background-color: #f39c12;
+    }
+    
+    h2 {
+        text-align: center;
+    }
+    
+  </style>
+  <h1 class="heading">Course schedule</h1>
+  <p style="font-size: 25px;margin-left: 20%;"><i style='font-size:20px' class='fas'>&#xf0f3;</i> Course start from 1st week of November, 2022</p>
+    <table style="border:1px solid black;margin-left:auto;margin-right:auto;font-size: 15px;">
+        <colgroup>
+            <col span="1" style="background-color: #ffbb4d">
+        </colgroup>
+        <tr >
+            <th>Time</th>
+            <th>Monday</th>
+            <th>Tuesday</th>
+            <th>Wednesday</th>
+            <th>Thursday</th>
+            <th>Friday</th>
+            <th>Saturday</th>
+            <th>Sunday</th>
+        </tr>
+        <tr>
+          <td>6:00 PM</td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+      </tr>
+        <tr>
+            <td>8:00 PM</td>
+            <td></td>
+            <td>
+              {%for registerCourse in registerCourses:%}
+                {% if registerCourse.course == 'mooncake' %}
+                    Mooncake<p>8:00PM - 10:00PM
+                {% endif %}
+              {% endfor %}
+            </td>
+            <td>
+        {%for registerCourse in registerCourses:%}
+          {% if registerCourse.course == 'brownie' %}
+            Brownie<p>8:00PM - 10:00PM
+          {% endif %}
+        {% endfor %}
+            </td>
+          <td>
+        {%for registerCourse in registerCourses:%}
+          {% if registerCourse.course == 'bread and bun' %}
+            Bread and Bun<p>8:00PM - 10:00PM
+          {% endif %}
+        {% endfor %}
+      </td><td>
+        {%for registerCourse in registerCourses:%}
+          {% if registerCourse.course == 'cookie' %}
+            Cookie<p>8:00PM - 10:00PM
+          {% endif %}
+        {% endfor %}</td><td>
+        {%for registerCourse in registerCourses:%}
+          {% if registerCourse.course == 'cake' %}
+            Cake<p>8:00PM - 10:00PM
+          {% endif %}
+        {% endfor %}</td>
+          <td></td>
+        </tr>
+      </table>
+</div>
+<script src='https://kit.fontawesome.com/a076d05399.js' crossorigin='anonymous'></script>
+<br><br><br>
+<div style="font-size: 25px;margin-left: 20%;">
+ <h4>Students</h4>
+  {% for key, value in CourseMates.items() %}
+    {%for registerCourse in registerCourses:%}
+    {% if key == registerCourse.course %}
+      <p>{{key}}: {{value}}</p>
+  {% endif %}
+      {% endfor%}
+    {% endfor %}
+  </div>  
+{% endblock %}
