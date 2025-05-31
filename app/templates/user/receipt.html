@@ -1,0 +1,64 @@
+{% extends "user/navbar.html" %}
+
+{% block content %}
+<div class="card">
+    <div class="card-body">
+        <h1 class="card-title mb-4">Order Receipt</h1>
+        <div class="mb-4">
+            <p class="card-text">Order ID: {{ receipt.id }}</p>
+            <p class="card-text">Customer Name: {{ receipt.customer_name }}</p>
+            <p class="card-text">Contact Number: {{ receipt.contact_number }}</p>
+            <p class="card-text">Delivery Address: {{ receipt.home_address }}</p>
+            <p class="card-text">Date: {{ receipt.date.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+        </div>
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Item</th>
+                        <th>Quantity</th>
+                        <th>Price</th>
+                        <th>Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in receipt.order_items %}
+                    <tr>
+                        <td>{{ item.product }}</td>
+                        <td>{{ item.quantity }}</td>
+                        <td>MYR {{ "%.2f"|format(item.price) }}</td>
+                        <td>MYR {{ "%.2f"|format(item.total) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td colspan="3" class="text-end"><strong>Total:</strong></td>
+                        <td><strong>MYR {{ "%.2f"|format(receipt.total_amount) }}</strong></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div><div class="text-center mt-4">
+            <p>Thank you for your purchase!</p>
+            <div class="d-grid gap-2">
+                <button class="btn btn-primary mb-3" onclick="window.print()">Print Receipt</button>
+                <a href="{{ url_for('enter_name') }}" class="btn btn-primary">
+                    Return to Home
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style media="print">
+    .navbar, .btn-primary {
+        display: none !important;
+    }
+    .card {
+        border: none !important;
+    }
+    @page {
+        margin: 0.5cm;
+    }
+</style>
+{% endblock %}

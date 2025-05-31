@@ -1,256 +1,390 @@
-from re import S
-from tkinter import X
-from flask import render_template, flash, redirect, url_for, request, session
-from flask_login import login_user, current_user, login_required, logout_user
-from sqlalchemy import func
-import operator
 import os
-
-from app import app, bcrypt, db
-from app.forms import *
-from app.models import User, RegisterCourse 
-
+import xml.etree.ElementTree as ET
+from .app import app
+from datetime import datetime
+from functools import wraps
 from werkzeug.utils import secure_filename
+from flask import render_template, request, redirect, url_for, session, flash
+from rdflib import Graph, Namespace, Literal
+from rdflib.namespace import RDF, RDFS
 
-ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg'}
+g = Graph()
+g.parse(os.path.join(os.path.dirname(__file__), "data", "products.ttl"), format="turtle")
+BK = Namespace("http://bakestore.com/ontology#")
+ADMIN_PASSWORD = 'BakeStore'
 
-
-def allowed_file(filename):
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-           
-
-@app.route('/', methods = ['GET', 'POST'])
-def home():
-    return render_template('home.html', title='Home')
-
-@app.route('/about')
-def about():
-    return render_template('about.html', title='About')
-
-@app.route('/register', methods = ['GET', 'POST'])
-def register():
-    form = RegisterForm()
-    if form.validate_on_submit():
-       username = form.username.data
-       email = form.email.data
-       password = bcrypt.generate_password_hash(form.password.data)
-       user=User(username=username, email=email, password=password)
-       db.session.add(user)
-       db.session.commit()
-       flash('Registration Sucess', category='success')
-       return redirect(url_for('login'))
-       
-    return render_template('register.html', title='Registration', form=form)
-
-@app.route('/login', methods = ['GET', 'POST'])
-def login():
-    if current_user.is_authenticated:
-        flash('User already login', category='info')
-        return redirect(url_for('account'))
+def get_products(keyword=None):
+    base_query = """
+        SELECT ?product ?name ?price ?description ?image
+        WHERE {
+            ?product rdf:type bakestore:Product ;
+                bakestore:name ?name ;
+                bakestore:price ?price ;
+                bakestore:description ?description ;
+                bakestore:image ?image .
+            %s
+        }
+    """
     
-    form = LoginForm()
-    if form.validate_on_submit():
-        username = form.username.data
-        password = form.password.data
-        remember = form.remember.data
-        #password check
-        user = User.query.filter_by(username=username).first()
-        
-        if user and bcrypt.check_password_hash(user.password, password):
-            login_user(user, remember = remember)
-            flash('Login success', category='info')
-            
-            if request.args.get('next'):
-                next_page = request.args.get('next')
-                return redirect(next_page)
-            return redirect(url_for('session_cart'))
-        
-        flash('User not exist or password unmatch', category='danger')
-        
-    return render_template('login.html', title='Login', form=form)
+    if keyword and keyword.strip():
+        search_term = keyword.lower()
+        filter_statement = f"""
+            FILTER (
+                CONTAINS(LCASE(STR(?name)), "{search_term}") ||
+                CONTAINS(LCASE(STR(?description)), "{search_term}")
+            )
+        """
+        query = base_query % filter_statement
+    else:
+        query = base_query % ""
 
-@app.route('/logout')
-def logout():
-    logout_user()
-    return redirect(url_for('login'))
+    results = g.query(query, initNs={'bakestore': BK})
+    products = []
+    for row in results:
+        products.append({
+            'id': str(row.product).split('#')[1],
+            'name': str(row.name),
+            'price': float(str(row.price)),
+            'description': str(row.description),
+            'image': str(row.image)
+        })
 
-@app.route('/course', methods=['GET','POST'])
-def course():
-    cart = session.get('cart', {'cake':0, 'cookie':0, 'bread and bun':0, 'brownie':0, 'mooncake':0})
+    return products
+
+@app.route('/')
+def index():    
+    if 'user_name' not in session:
+        return redirect(url_for('enter_name'))
     
-    #Course ranking
-    CakeNum = RegisterCourse.query.filter_by(course='cake').with_entities(func.sum(RegisterCourse.quantity).label('cakes')).first().cakes
-    CookieNum = RegisterCourse.query.filter_by(course='cookie').with_entities(func.sum(RegisterCourse.quantity).label('cookies')).first().cookies
-    BunNum = RegisterCourse.query.filter_by(course='bread and bun').with_entities(func.sum(RegisterCourse.quantity).label('buns')).first().buns
-    BrownieNum = RegisterCourse.query.filter_by(course='brownie').with_entities(func.sum(RegisterCourse.quantity).label('brownies')).first().brownies
-    MooncakeNum = RegisterCourse.query.filter_by(course='mooncake').with_entities(func.sum(RegisterCourse.quantity).label('mooncakes')).first().mooncakes
-    
-    if CakeNum:
-        pass
+    keyword = request.args.get('search', '')
+    if keyword:
+        keyword = keyword.strip()
+        products = get_products(keyword)
     else:
-        CakeNum=0
-    if CookieNum:
-        pass
-    else:
-        CookieNum=0    
-    if BunNum:
-        pass
-    else:
-        BunNum=0
-    if BrownieNum:
-        pass
-    else:
-        BrownieNum=0
-    if MooncakeNum:
-        pass
-    else:
-        MooncakeNum=0
-    
-    Courses = {'cake':CakeNum, 'cookie':CookieNum, 'bread and bun':BunNum, 'brownie':BrownieNum, 'mooncake':MooncakeNum}
-    
-    #Ranking sort
-    CourseRank = dict(sorted(Courses.items(), key=operator.itemgetter(1),reverse=True))
-    #double sort in template
-   
-   
+        products = get_products()
+
+    return render_template('user/index.html', products=products, 
+                           user_name=session['user_name'], keyword=keyword)
+
+@app.route('/enter_name', methods=['GET', 'POST'])
+def enter_name():
     if request.method == 'POST':
-        # add to cart
-        courses = request.form.get('coursesid')
-        if cart[courses] ==1:
-            flash('You can only register each course per account', category='info' )
+        session['user_name'] = request.form['name']
         
-        else:
-            if Courses[courses] >= 5:
-                    flash('Course capacity have already full', category='info' )
-            else:
-                    cart[courses] += 1
-                    flash('You have added '+ courses, category='info' )
-                    session['cart'] = cart
-                    return redirect(url_for('session_cart'))
-            
-
-    return render_template('course.html', title='Course', cart=cart, CourseRank=CourseRank)  
-
-@app.route('/cart', methods=['GET','POST'])
-def session_cart():
-    if 'cart' in session:
-        cart = session.get('cart')
-        show = session.get('show_cart', True)
-    else:
-        session['cart'] = {'cake':0, 'cookie':0, 'bread and bun':0, 'brownie':0, 'mooncake':0}
-        return redirect(request.referrer)
+        return redirect(url_for('index'))
     
-    return render_template('cart.html', title='Cart', cartContents=show, cart=cart)
+    return render_template('user/enter_name.html')
 
-@app.route('/clearCart', methods=['POST'])
-def clearCart():
-    session['cart'] = {'cake':0, 'cookie':0, 'bread and bun':0, 'brownie':0, 'mooncake':0}
-    flash('Cart cleared', category='info')
-    return redirect(url_for('session_cart'))
+@app.route('/add_to_cart/<product_id>')
+def add_to_cart(product_id):
+    if 'cart' not in session:
+        session['cart'] = {}
+    
+    products = get_products()
+    product = next((p for p in products if p['id'] == product_id), None)
+    
+    if product_id in session['cart']:
+        session['cart'][product_id] += 1
+        msg = f"Added another {product['name']} to cart"
+    else:
+        session['cart'][product_id] = 1
+        msg = f"Added {product['name']} to cart"
+    
+    session.modified = True
+    flash(msg, 'success')
+    return redirect(url_for('index'))
+
+@app.route('/remove_from_cart/<product_id>')
+def remove_from_cart(product_id):
+    if 'cart' in session and product_id in session['cart']:
+        del session['cart'][product_id]
+        session.modified = True
+
+    return redirect(url_for('cart'))
+
+@app.route('/cart')
+def cart():
+    if 'cart' not in session:
+        return render_template('user/cart.html', items=[], total=0)
+    
+    total = 0
+    cart_items = []
+    products = get_products()
+    products_dict = {p['id']: p for p in products}
+    
+    for product_id, quantity in session['cart'].items():
+        product = products_dict.get(product_id)
+        if product:
+            item_total = product['price'] * quantity
+            total += item_total
+            cart_items.append({
+                'product': product,
+                'quantity': quantity,
+                'total': item_total
+            })
+    
+    return render_template('user/cart.html', items=cart_items, total=total)
 
 @app.route('/checkout', methods=['POST'])
 def checkout():
-    if session['cart'] == {'cake':0, 'cookie':0, 'bread and bun':0, 'brownie':0, 'mooncake':0}:
-        flash('You must add course before checkout', category='info')
-        return redirect(url_for('course'))
-    
-    if current_user.is_authenticated:
-        username=current_user.username
-        user = User.query.filter_by(username=username).first()
-        registerCourse = RegisterCourse.query.filter_by(user_id=user.id).all()
-        registerCourses = list(dict.fromkeys(registerCourse))
-        
-        session['carts'] = session['cart']
-        for key, value in session['carts'].items():
-            for registerCourse in registerCourses:
-                if key in registerCourse.course:
-                    if value == registerCourse.quantity:
-                        flash('You can only register each course per account', category='info' )
-                        return redirect(url_for('session_cart')) 
-                    
-    if current_user.is_authenticated:
-        return redirect(url_for('payment'))
-    else:
-        flash('You must login before checkout', category='info')
-        return redirect(url_for('session_cart'))
-      
-    
-@app.route('/payment', methods=['GET','POST'])
-@login_required
-def payment():
-    if 'cart' in session:
-        cart = session.get('cart')
-        show = session.get('show_cart', True)
-    else:
-        return redirect(url_for('session_cart'))
-    
-    prices = {'cake':85, 'cookie':115, 'bread and bun':145, 'brownie':105, 'mooncake':125}
-    x=session['cart']
-                   
-    if session['cart'] == {'cake':0, 'cookie':0, 'bread and bun':0, 'brownie':0, 'mooncake':0}:
-        flash('You must add course before checkout', category='info')
-        return redirect(url_for('session_cart'))
-    
-    form = upload_payment()
-    if current_user.is_authenticated:
-        
-      if form.validate_on_submit():
-        f = form.receipt.data
-    
-        if f.filename == '':
-            flash('No selected file', category = 'danger')
-            return render_template(url_for('payment'), form=form)
-        
-        if f and allowed_file(f.filename):
-            filename = secure_filename(f.filename)
-            f.save(os.path.join('app', 'static', 'assets', filename))
-            
-            #add to user database
-            for key, value in session['cart'].items():
-              if value>=1:
-                registerCourse = RegisterCourse(course=key,quantity=value)
-                current_user.registerCourses.append(registerCourse)
-                db.session.commit()
-            
-            flash(' You have successfully register', category='success')
-            session['cart'] = {'cake':0, 'cookie':0, 'bread and bun':0, 'brownie':0, 'mooncake':0}
-            session.pop("carts", None)
+    if 'cart' not in session or not session['cart']:
+        return redirect(url_for('index'))
 
-            return redirect(url_for('account', username= current_user.username))
-        
-      return render_template('payment.html', form=form, cartContents=show, cart=cart, prices=prices,x=x)
-  
-    else:
-        flash('You must login before checkout', category='info')
-        return redirect(url_for('login'))
+    order = ET.Element('order')
+    ET.SubElement(order, 'date').text = datetime.now().isoformat()
+    customer = ET.SubElement(order, 'customer')
+    ET.SubElement(customer, 'name').text = session.get('user_name', 'Unknown')
+    ET.SubElement(customer, 'contact').text = request.form.get('contact_number', 'Not provided')
+    ET.SubElement(customer, 'address').text = request.form.get('home_address', 'Not provided')
+    
+    items = ET.SubElement(order, 'items')
+    total = 0
+    products = get_products()
+    products_dict = {p['id']: p for p in products}
+    
+    for product_id, quantity in session['cart'].items():
+        product = products_dict.get(product_id)
+        if product:
+            item = ET.SubElement(items, 'item')
+            ET.SubElement(item, 'product').text = product['name']
+            ET.SubElement(item, 'quantity').text = str(quantity)
+            ET.SubElement(item, 'price').text = str(product['price'])
+            item_total = product['price'] * quantity
+            ET.SubElement(item, 'total').text = str(item_total)
+            total += item_total
+    
+    ET.SubElement(order, 'total').text = str(total)
+    order_id = datetime.now().strftime('%Y%m%d%H%M%S')
+    records_dir = os.path.join(os.path.dirname(__file__), "records")
+    if not os.path.exists(records_dir):
+        os.makedirs(records_dir)
+    
+    from xml.dom import minidom
+    xml_str = minidom.parseString(ET.tostring(order)).toprettyxml(indent="    ")
+    
+    with open(os.path.join(records_dir, f'order_{order_id}.xml'), 'w', encoding='utf-8') as f:
+        f.write(xml_str)    
+        session_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'flask_session',
+                                    session.sid if hasattr(session, 'sid') else '')
+    session.clear()
+    
+    if os.path.exists(session_file):
+        os.remove(session_file)    
+    
+    receipt = generate_receipt_data(order_id)
+    return render_template('user/receipt.html', receipt=receipt)
 
-@app.route('/account')
-@login_required
-def account():
-    username=current_user.username
-    user = User.query.filter_by(username=username).first()
-    if user:
-        page = request.args.get('page',1,type=int)
-        registerCourses = RegisterCourse.query.filter_by(user_id=user.id).order_by(RegisterCourse.date_registered.desc()).paginate(page,10,False)
+def generate_receipt_data(order_id):
+    xml_path = os.path.join(os.path.dirname(__file__), "records", f"order_{order_id}.xml")
+    if not os.path.exists(xml_path):
+        return None
+    
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+    order_items = []
+    items_element = root.find('items')
+
+    if items_element is not None:
+        for item in items_element.findall('item'):
+            order_items.append({
+                'product': item.find('product').text,
+                'quantity': int(item.find('quantity').text),
+                'price': float(item.find('price').text),
+                'total': float(item.find('total').text)
+            })
+            
+    customer = root.find('customer')
+    customer_name = customer.find('name').text if customer is not None and customer.find('name') is not None else 'Unknown'
+    contact_number = customer.find('contact').text if customer is not None and customer.find('contact') is not None else 'Not provided'
+    home_address = customer.find('address').text if customer is not None and customer.find('address') is not None else 'Not provided'
+
+    return {
+        'id': order_id,
+        'date': datetime.fromisoformat(root.find('date').text),
+        'customer_name': customer_name,
+        'contact_number': contact_number,
+        'home_address': home_address,
+        'order_items': order_items,
+        'total_amount': float(root.find('total').text)
+    }
+
+def save_products_to_ttl():
+    new_g = Graph()
+    new_g.bind('', BK)
+    new_g.bind('rdf', RDF)
+    new_g.bind('rdfs', RDFS)
+    
+    schema_triples = [
+        (BK.Product, RDF.type, RDFS.Class),
+        (BK.name, RDF.type, RDF.Property),
+        (BK.price, RDF.type, RDF.Property),
+        (BK.description, RDF.type, RDF.Property),
+        (BK.image, RDF.type, RDF.Property)
+    ]
+    for triple in schema_triples:
+        new_g.add(triple)
+    
+    for s, p, o in g.triples((None, RDF.type, BK.Product)):
+        new_g.add((s, p, o))
+        for p2, o2 in g.predicate_objects(s):
+            new_g.add((s, p2, o2))
+    
+    new_g.serialize(os.path.join(os.path.dirname(__file__), "data", "products.ttl"), format="turtle")
+
+
+
+#  ADMIN ROUTES  
+
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('admin_authenticated'):
+            return redirect(url_for('login', next=request.url))
         
-        return render_template('account.html', title='Account', registerCourses=registerCourses, user=user)
-    else:
-        return '404'
+        return f(*args, **kwargs)
     
-@app.route('/User_course/<username>')
-@login_required
-def user_course(username):
-    CakeMate = RegisterCourse.query.filter_by(course='cake').all()
-    CookieMate = RegisterCourse.query.filter_by(course='cookie').all()
-    BunMate = RegisterCourse.query.filter_by(course='bread and bun').all()
-    BrownieMate = RegisterCourse.query.filter_by(course='brownie').all()
-    MooncakeMate = RegisterCourse.query.filter_by(course='mooncake').all()
+    return decorated_function
+
+@app.route('/admin')
+@admin_required
+def products():
+    products = get_products()
+    return render_template('admin/products.html', products=products)
+
+@app.route('/admin/login', methods=['GET', 'POST'])
+def login():
+    error = None
+    if request.method == 'POST':
+        if request.form['password'] == ADMIN_PASSWORD:
+            session['admin_authenticated'] = True
+            next_page = request.args.get('next')
+
+            if next_page:
+                return redirect(next_page)
+
+            return redirect(url_for('products'))
+        error = 'Invalid password'
+
+    return render_template('admin/login.html', error=error)
+
+@app.route('/admin/logout')
+def logout():
+    session.pop('admin_authenticated', None)
+    return redirect(url_for('index'))
+
+@app.route('/admin/product/add', methods=['GET', 'POST'])
+@admin_required
+def add_product():
+    if request.method == 'POST':
+        name = request.form['name']
+        price = request.form['price']
+        description = request.form['description']
+        
+        image = request.files['image']
+        if image:
+            filename = secure_filename(image.filename)
+            image.save(os.path.join(os.path.dirname(__file__), 'static', 'images', filename))
+        
+        product_id = name.replace(' ', '')
+        product_uri = BK[product_id]
+        
+        g.add((product_uri, RDF.type, BK.Product))
+        g.add((product_uri, BK.name, Literal(name)))
+        g.add((product_uri, BK.price, Literal(price)))
+        g.add((product_uri, BK.description, Literal(description)))
+        g.add((product_uri, BK.image, Literal(filename)))
+        
+        save_products_to_ttl()
+
+        return redirect(url_for('products'))
+        
+    return render_template('admin/product_form.html', product=None)
+
+@app.route('/admin/product/edit/<product_id>', methods=['GET', 'POST'])
+@admin_required
+def edit_product(product_id):
+    product_uri = BK[product_id]
     
-    CourseMates= {'cake':CakeMate, 'cookie':CookieMate, 'bread and bun':BunMate, 'brownie':BrownieMate, 'mooncake':MooncakeMate}
+    if request.method == 'POST':
+        name = request.form['name']
+        price = request.form['price']
+        description = request.form['description']
+        
+        image = request.files['image']
+        if image and image.filename:
+            filename = secure_filename(image.filename)
+            image.save(os.path.join(os.path.dirname(__file__), 'static', 'images', filename))
+        else:
+            filename = g.value(product_uri, BK.image)
+        
+        for p, o in g.predicate_objects(product_uri):
+            g.remove((product_uri, p, o))
+        
+        g.add((product_uri, RDF.type, BK.Product))
+        g.add((product_uri, BK.name, Literal(name)))
+        g.add((product_uri, BK.price, Literal(price)))
+        g.add((product_uri, BK.description, Literal(description)))
+        g.add((product_uri, BK.image, Literal(filename)))
+        
+        save_products_to_ttl()
+        
+        return redirect(url_for('products'))
     
-    username=current_user.username
-    user = User.query.filter_by(username=username).first()
-    registerCourses = RegisterCourse.query.filter_by(user_id=user.id).all()
+    product = {
+        'id': product_id,
+        'name': g.value(product_uri, BK.name),
+        'price': float(g.value(product_uri, BK.price)),
+        'description': g.value(product_uri, BK.description),
+        'image': g.value(product_uri, BK.image)
+    }
     
-    return render_template('user_course.html', title='Your schedule', user=username, CourseMates=CourseMates, registerCourses=registerCourses )
+    return render_template('admin/product_form.html', product=product)
+
+@app.route('/admin/product/delete/<product_id>', methods=['POST'])
+@admin_required
+def delete_product(product_id):
+    product_uri = BK[product_id]
+    
+    for p, o in g.predicate_objects(product_uri):
+        g.remove((product_uri, p, o))
+    
+    save_products_to_ttl()
+    
+    return redirect(url_for('products'))
+
+@app.route('/admin/receipts')
+@admin_required
+def receipts():
+    receipts = []
+    records_dir = os.path.join(os.path.dirname(__file__), "records")
+    
+    if os.path.exists(records_dir):
+        for filename in os.listdir(records_dir):
+            if filename.startswith('order_') and filename.endswith('.xml'):
+                tree = ET.parse(os.path.join(records_dir, filename))
+                root = tree.getroot()
+                
+                order_id = filename[6:-4]
+                date = datetime.fromisoformat(root.find('date').text)
+                customer = root.find('customer')
+                customer_name = customer.find('name').text
+                total = float(root.find('total').text)
+                
+                receipts.append({
+                    'id': order_id,
+                    'date': date,
+                    'customer_name': customer_name,
+                    'total_amount': total
+                })
+    
+    receipts.sort(key=lambda x: x['date'], reverse=True)
+    return render_template('admin/receipts.html', receipts=receipts)
+
+@app.route('/admin/receipt/<receipt_id>')
+@admin_required
+def view_receipt(receipt_id):
+    receipt_data = generate_receipt_data(receipt_id)
+    if receipt_data is None:
+        return "Receipt not found", 404
+    
+    return render_template('admin/view_receipt.html', receipt=receipt_data)
