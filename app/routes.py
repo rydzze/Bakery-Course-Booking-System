@@ -1,10 +1,13 @@
+import os
+import operator
 from re import S
-from tkinter import X
 from flask import render_template, flash, redirect, url_for, request, session
 from flask_login import login_user, current_user, login_required, logout_user
 from sqlalchemy import func
-import operator
-import os
+from decimal import Decimal
+from rdflib import Graph
+from SPARQLWrapper import SPARQLWrapper, JSON
+from datetime import datetime
 
 from app import app, bcrypt, db
 from app.forms import *
@@ -12,8 +15,117 @@ from app.models import User, RegisterCourse
 
 from werkzeug.utils import secure_filename
 
-ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg'}
+ALLOWED_EXTENSIONS = {'ttl'}
 
+def verify_receipt(content, cart, prices, username):
+    try:
+        g = Graph()
+        g.parse(data=content, format='turtle')
+        
+        sparql = SPARQLWrapper("sparql")
+        sparql.setReturnFormat(JSON)
+        
+        query_check_date = """
+        PREFIX pb: <http://peoplebakery.com/ns#>
+        PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+        SELECT ?date
+        WHERE {
+            ?receipt a pb:Receipt ;
+                     pb:date ?date .
+        }
+        """
+        
+        results = g.query(query_check_date)
+        receipt_date = None
+        for result in results:
+            receipt_date = str(result[0]).split('T')[0]
+            
+        today = datetime.now().strftime('%Y-%m-%d')
+        if receipt_date != today:
+            return False, "Receipt date must be today's date"
+            
+        query_check_user = """
+        PREFIX pb: <http://peoplebakery.com/ns#>
+        SELECT ?username
+        WHERE {
+            ?receipt a pb:Receipt ;
+                     pb:issuedTo ?user .
+            ?user pb:username ?username .
+        }
+        """
+        
+        results = g.query(query_check_user)
+        receipt_username = None
+        for result in results:
+            receipt_username = str(result[0])
+            
+        if receipt_username != username:
+            return False, "Receipt username does not match current user"
+            
+        query_check_course_price = """
+        PREFIX pb: <http://peoplebakery.com/ns#>
+        SELECT ?courseName ?coursePrice
+        WHERE {
+            ?receipt a pb:Receipt ;
+                     pb:includesCourse ?course .
+            ?course pb:courseName ?courseName ;
+                    pb:price ?coursePrice .
+        }
+        """
+        
+        receipt_courses = set()
+        sparql.setQuery(query_check_course_price)
+        for result in g.query(query_check_course_price):
+            course_name = str(result[0]).lower()
+            course_price = float(result[1])
+            receipt_courses.add(course_name)
+            
+            if course_name in cart and cart[course_name] > 0:
+                expected_price = float(prices[course_name])
+                if abs(course_price - expected_price) > 0.01:
+                    return False, f"Course price mismatch for {course_name}: Receipt shows ${course_price}"
+
+        cart_courses = {course.lower() for course, qty in cart.items() if qty > 0}
+        if cart_courses != receipt_courses:
+            return False, "Courses in receipt do not match cart contents"
+
+        query_check_total_price = """
+        PREFIX pb: <http://peoplebakery.com/ns#>
+        SELECT ?totalPrice ?regFee
+        WHERE {
+            ?receipt a pb:Receipt ;
+                     pb:totalPrice ?totalPrice ;
+                     pb:registrationFee ?regFee .
+        }
+        """
+        
+        reg_fee = 20.00
+        course_total = sum(prices[course] * qty for course, qty in cart.items() if qty > 0)
+        expected_total = reg_fee + course_total
+        
+        results = g.query(query_check_total_price)
+        for result in results:
+            receipt_total = float(result[0])
+            receipt_reg_fee = float(result[1])
+            
+            if receipt_reg_fee != reg_fee:
+                return False, f"Registration fee ${receipt_reg_fee} does not match required fee ${reg_fee}"
+                
+            if abs(receipt_total - expected_total) > 0.01:
+                return False, f"Receipt total ${receipt_total} does not match expected total ${expected_total}"
+            
+        return True, "Receipt validation successful"
+        
+    except Exception as e:
+        return False, f"Error parsing receipt: {str(e)}"
+
+def is_valid_ttl(content):
+    content_str = content.decode('utf-8')
+    required_elements = [
+        '@prefix', 'pb:Receipt', 'pb:issuedTo', 'pb:includesCourse',
+        'pb:totalPrice', 'pb:registrationFee', 'pb:date'
+    ]
+    return all(element in content_str for element in required_elements)
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -196,13 +308,23 @@ def payment():
     if current_user.is_authenticated:
         
       if form.validate_on_submit():
-        f = form.receipt.data
-    
+        f = form.receipt.data        
         if f.filename == '':
             flash('No selected file', category = 'danger')
-            return render_template(url_for('payment'), form=form)
+            return render_template('payment.html', form=form, cartContents=show, cart=cart, prices=prices, x=x)
         
         if f and allowed_file(f.filename):
+            content = f.read()
+            if not is_valid_ttl(content):
+                flash('Invalid TTL file format. Please provide a valid RDF receipt file.', category='danger')
+                return render_template('payment.html', form=form, cartContents=show, cart=cart, prices=prices, x=x)
+            
+            is_valid, error_message = verify_receipt(content, cart, prices, current_user.username)
+            if not is_valid:
+                flash(f'Invalid receipt: {error_message}', category='danger')
+                return render_template('payment.html', form=form, cartContents=show, cart=cart, prices=prices, x=x)
+            
+            f.seek(0)
             filename = secure_filename(f.filename)
             f.save(os.path.join('app', 'static', 'assets', filename))
             
@@ -231,8 +353,7 @@ def account():
     username=current_user.username
     user = User.query.filter_by(username=username).first()
     if user:
-        page = request.args.get('page',1,type=int)
-        registerCourses = RegisterCourse.query.filter_by(user_id=user.id).order_by(RegisterCourse.date_registered.desc()).paginate(page,10,False)
+        registerCourses = RegisterCourse.query.filter_by(user_id=user.id).order_by(RegisterCourse.date_registered.desc()).paginate()
         
         return render_template('account.html', title='Account', registerCourses=registerCourses, user=user)
     else:
