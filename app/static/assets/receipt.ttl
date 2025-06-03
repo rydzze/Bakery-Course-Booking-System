@@ -1,0 +1,16 @@
+@prefix pb: <http://peoplebakery.com/ns#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+pb:buyer a pb:User ;
+    pb:username "xiaocu2021" .
+
+pb:course1 a pb:Course ;
+    pb:courseName "cake" ;
+    pb:price "85.00"^^xsd:decimal .
+
+pb:receipt001 a pb:Receipt ;
+    pb:issuedTo pb:buyer ;
+    pb:includesCourse pb:course1 ;
+    pb:registrationFee "20.00"^^xsd:decimal ;
+    pb:totalPrice "105.00"^^xsd:decimal ;
+    pb:date "2025-06-03T10:00:00"^^xsd:dateTime .

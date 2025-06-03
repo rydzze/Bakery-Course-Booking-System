@@ -28,6 +28,11 @@ class LoginForm(FlaskForm):
     password = PasswordField('Password', validators=[DataRequired(), Length(min=8,max=20)])
     remember = BooleanField('Remember me')
     submit = SubmitField('Sign in')
+
+class AdminLoginForm(FlaskForm):
+    username = StringField('Admin Username', validators=[DataRequired(), Length(min=4, max=20)])
+    password = PasswordField('Password', validators=[DataRequired(), Length(min=8, max=20)])
+    submit = SubmitField('Admin Login')
     
 class upload_payment(FlaskForm):
     receipt = FileField(validators= [FileRequired()])

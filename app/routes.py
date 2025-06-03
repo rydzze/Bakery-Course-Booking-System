@@ -1,7 +1,7 @@
 import os
 import operator
 from re import S
-from flask import render_template, flash, redirect, url_for, request, session
+from flask import render_template, flash, redirect, url_for, request, session, make_response
 from flask_login import login_user, current_user, login_required, logout_user
 from sqlalchemy import func
 from decimal import Decimal
@@ -11,9 +11,11 @@ from datetime import datetime
 
 from app import app, bcrypt, db
 from app.forms import *
-from app.models import User, RegisterCourse 
+from app.models import User, RegisterCourse, Admin 
 
 from werkzeug.utils import secure_filename
+
+import xml.etree.ElementTree as ET
 
 ALLOWED_EXTENSIONS = {'ttl'}
 
@@ -182,10 +184,38 @@ def login():
         
     return render_template('login.html', title='Login', form=form)
 
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    form = AdminLoginForm()
+    if form.validate_on_submit():
+        admin = Admin.query.filter_by(username=form.username.data).first()
+        if admin and bcrypt.check_password_hash(admin.password, form.password.data):
+            session['admin_logged_in'] = True
+            session['admin_username'] = admin.username
+            flash('Welcome Admin!', 'success')
+            return redirect(url_for('admin_dashboard'))
+        else:
+            flash('Invalid credentials', 'danger')
+    return render_template('admin_login.html', form=form)
+
+@app.route('/admin/logout')
+def admin_logout():
+    session.pop('admin_logged_in', None)
+    session.pop('admin_username', None)
+    flash('Logged out successfully.', 'info')
+    return redirect(url_for('admin_login'))
+
 @app.route('/logout')
 def logout():
     logout_user()
     return redirect(url_for('login'))
+
+@app.route('/admin/dashboard')
+def admin_dashboard():
+    if not session.get('admin_logged_in'):
+        flash('You must be logged in as admin to view this page.', 'warning')
+        return redirect(url_for('admin_login'))
+    return render_template('admin_dashboard.html')
 
 @app.route('/course', methods=['GET','POST'])
 def course():
@@ -359,6 +389,44 @@ def account():
     else:
         return '404'
     
+@app.route('/export/calendar/<username>')
+@login_required
+def export_calendar(username):
+    user = User.query.filter_by(username=username).first()
+    if not user:
+        flash("User not found", category='danger')
+        return redirect(url_for('account'))
+
+    registerCourses = RegisterCourse.query.filter_by(user_id=user.id).all()
+
+    # Mapping of course to day
+    course_schedule = {
+        "cake": "Saturday",
+        "cookie": "Friday",
+        "bread and bun": "Thursday",
+        "brownie": "Wednesday",
+        "mooncake": "Tuesday"
+    }
+
+    root = ET.Element("Schedule")
+    for course in registerCourses:
+        course_elem = ET.SubElement(root, "Course")
+        course_name = course.course.lower()
+
+        ET.SubElement(course_elem, "Name").text = course.course.title()
+        ET.SubElement(course_elem, "Date").text = course.date_registered.strftime('%Y-%m-%d')
+        ET.SubElement(course_elem, "Day").text = course_schedule.get(course_name, "Unassigned")
+        ET.SubElement(course_elem, "Time").text = "8:00 PM - 10:00 PM"
+        ET.SubElement(course_elem, "Duration").text = "10 hours"
+        ET.SubElement(course_elem, "Modules").text = "5"
+
+    xml_data = ET.tostring(root, encoding='utf-8', method='xml')
+
+    response = make_response(xml_data)
+    response.headers['Content-Type'] = 'application/xml'
+    response.headers['Content-Disposition'] = f'attachment; filename={username}_calendar.xml'
+    return response
+    
 @app.route('/User_course/<username>')
 @login_required
 def user_course(username):
@@ -375,3 +443,33 @@ def user_course(username):
     registerCourses = RegisterCourse.query.filter_by(user_id=user.id).all()
     
     return render_template('user_course.html', title='Your schedule', user=username, CourseMates=CourseMates, registerCourses=registerCourses )
+
+@app.route('/admin/export')
+def export_students_by_course():
+    if 'admin_username' not in session:
+        flash('Access denied. Please log in as admin.', 'danger')
+        return redirect(url_for('admin_login'))
+
+    from xml.etree.ElementTree import Element, SubElement, tostring
+    from xml.dom.minidom import parseString
+
+    root = Element('Courses')
+
+    courses = db.session.query(RegisterCourse.course).distinct()
+    for course_entry in courses:
+        course_name = course_entry.course
+        course_elem = SubElement(root, 'Course', name=course_name)
+
+        students = RegisterCourse.query.filter_by(course=course_name).all()
+        for student in students:
+            student_elem = SubElement(course_elem, 'Student')
+            SubElement(student_elem, 'Username').text = student.person.username
+            SubElement(student_elem, 'Email').text = student.person.email
+            SubElement(student_elem, 'Quantity').text = str(student.quantity)
+            SubElement(student_elem, 'DateRegistered').text = student.date_registered.strftime('%Y-%m-%d')
+
+    xml_str = parseString(tostring(root)).toprettyxml(indent="  ")
+    response = make_response(xml_str)
+    response.headers['Content-Type'] = 'application/xml'
+    response.headers['Content-Disposition'] = 'attachment; filename=students_by_course.xml'
+    return response

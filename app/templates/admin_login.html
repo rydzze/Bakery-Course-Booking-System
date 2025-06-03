@@ -1,0 +1,77 @@
+{% extends 'bootstrap/base.html' %}
+
+{% block head %}
+<head>
+  <link href="{{ bootstrap_find_resource('css/bootstrap.css', cdn='bootstrap') }}" rel="stylesheet"> 
+  <link rel="preconnect" href="https://fonts.gstatic.com">
+  <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.2/css/all.min.css">
+  <title>{% block title %}Admin Login{% endblock title %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+{% endblock head %}
+
+{% block navbar %}
+<header>
+  <h2 class="logo" style="padding-bottom: 10px;">4 People Bakery</h2>
+  <nav class="navbar" style="padding-top: 33px;">
+      <ul>
+          <li><a href="{{ url_for('home') }}">Home</a></li>
+          <li><a href="{{ url_for('about') }}">About</a></li>
+          <li><a href="{{ url_for('course') }}">Course</a></li>
+          <li><a href="{{ url_for('session_cart') }}">Cart</a></li>
+          {% if not current_user.is_authenticated %}
+              <li><a href="{{ url_for('admin_login') }}">Admin Login</a></li>
+          {% endif %}
+      </ul>
+  </nav>
+</header>
+{% endblock navbar %}
+
+{% block content %}
+<section>
+  <br><br><br><br>
+  <div class="container" style="max-width: 500px;">
+    <h1 class="heading" style="text-align: center;">Admin Login</h1>
+    <br>
+
+    {% with messages = get_flashed_messages(with_categories=True) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="col-md-12">
+      <form method="POST">
+        {{ form.hidden_tag() }}
+
+        <div style="margin-bottom: 20px;">
+          {{ form.username.label }}
+          {{ form.username(class="form-control", style="height: 45px; font-size: 16px; padding-left: 10px;") }}
+        </div>
+
+        <div style="margin-bottom: 20px;">
+          {{ form.password.label }}
+          {{ form.password(class="form-control", style="height: 45px; font-size: 16px; padding-left: 10px;") }}
+        </div>
+
+        <div>
+          {{ form.submit(class="btn", style="width: 100%; font-size: 18px;") }}
+        </div>
+      </form>
+    </div>
+  </div>
+</section>
+{% endblock content %}
+
+{% block footer %}
+  {% include 'footer.html' %}
+{% endblock %}
+
+{% block script %}
+  {% include 'script.html' %}
+{% endblock %}

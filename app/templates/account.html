@@ -52,6 +52,10 @@
 <div>
     <br><br>
     <a style="font-size: 25px;margin-left: 15%;" href="{{ url_for('user_course', username=user.username)}}">Your course schedule</a>
+    <br><br>
+    <a class="btn btn-outline-primary" style="margin-left: 15%;" href="{{ url_for('export_calendar', username=current_user.username) }}">
+        Export Calendar (XML)
+    </a>
 </div>
 {% endif %}
 {% endblock %}
