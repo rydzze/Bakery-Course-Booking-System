@@ -27,7 +27,7 @@ def verify_receipt(content, cart, prices, username):
         sparql = SPARQLWrapper("sparql")
         sparql.setReturnFormat(JSON)
         
-        query_check_date = """
+        query_check_datetime = """
         PREFIX pb: <http://peoplebakery.com/ns#>
         PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
         SELECT ?date
@@ -36,15 +36,23 @@ def verify_receipt(content, cart, prices, username):
                      pb:date ?date .
         }
         """
-        
-        results = g.query(query_check_date)
+
+        results = g.query(query_check_datetime)
         receipt_date = None
+        receipt_time = None
         for result in results:
-            receipt_date = str(result[0]).split('T')[0]
+            receipt_datetime = str(result[0])
+            receipt_date = receipt_datetime.split('T')[0]
+            receipt_time = receipt_datetime.split('T')[1].split('+')[0].split('.')[0]
             
-        today = datetime.now().strftime('%Y-%m-%d')
-        if receipt_date != today:
-            return False, "Receipt date must be today's date"
+        stored_date = session.get('receipt_date')
+        stored_time = session.get('receipt_time')
+        
+        if not stored_date or not stored_time:
+            return False, "No receipt has been generated yet. Please generate a new receipt."
+        
+        if receipt_date != stored_date or receipt_time != stored_time:
+            return False, f"Receipt datetime does not match with generated receipt time"
             
         query_check_user = """
         PREFIX pb: <http://peoplebakery.com/ns#>
@@ -291,6 +299,58 @@ def clearCart():
     flash('Cart cleared', category='info')
     return redirect(url_for('session_cart'))
 
+@app.route('/generate_receipt')
+@login_required
+def generate_receipt():
+    if 'cart' not in session or session['cart'] == {'cake':0, 'cookie':0, 'bread and bun':0, 'brownie':0, 'mooncake':0}:
+        flash('Cart is empty', category='info')
+        return redirect(url_for('session_cart'))
+        
+    prices = {'cake':85, 'cookie':115, 'bread and bun':145, 'brownie':105, 'mooncake':125}
+    reg_fee = 20.00
+    cart = session.get('cart')
+    
+    course_total = sum(prices[course] * qty for course, qty in cart.items() if qty > 0)
+    total_price = course_total + reg_fee
+    ttl_content = f"""@prefix pb: <http://peoplebakery.com/ns#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+pb:buyer a pb:User ;
+    pb:username "{current_user.username}" .
+
+"""
+    course_count = 1
+    for course, qty in cart.items():
+        if qty > 0:
+            ttl_content += f"""pb:course{course_count} a pb:Course ;
+    pb:courseName "{course}" ;
+    pb:price "{float(prices[course]):.2f}"^^xsd:decimal .
+
+"""
+            course_count += 1
+
+    ttl_content += f"""pb:receipt001 a pb:Receipt ;
+    pb:issuedTo pb:buyer ;"""
+
+    course_count = 1
+    for course, qty in cart.items():
+        if qty > 0:
+            ttl_content += f"\n    pb:includesCourse pb:course{course_count} ;"
+            course_count += 1    # Store the generation time in session
+    receipt_datetime = datetime.now()
+    session['receipt_date'] = receipt_datetime.strftime('%Y-%m-%d')
+    session['receipt_time'] = receipt_datetime.strftime('%H:%M:%S')
+    
+    ttl_content += f"""
+    pb:registrationFee "{reg_fee:.2f}"^^xsd:decimal ;
+    pb:totalPrice "{total_price:.2f}"^^xsd:decimal ;
+    pb:date "{session['receipt_date']}T{session['receipt_time']}"^^xsd:dateTime ."""
+    
+    response = make_response(ttl_content)
+    response.headers['Content-Type'] = 'text/turtle'
+    response.headers['Content-Disposition'] = f'attachment; filename={current_user.username}_receipt.ttl'
+    return response
+
 @app.route('/checkout', methods=['POST'])
 def checkout():
     if session['cart'] == {'cake':0, 'cookie':0, 'bread and bun':0, 'brownie':0, 'mooncake':0}:
@@ -336,18 +396,21 @@ def payment():
     
     form = upload_payment()
     if current_user.is_authenticated:
-        
-      if form.validate_on_submit():
-        f = form.receipt.data        
-        if f.filename == '':
-            flash('No selected file', category = 'danger')
-            return render_template('payment.html', form=form, cartContents=show, cart=cart, prices=prices, x=x)
-        
-        if f and allowed_file(f.filename):
-            content = f.read()
-            if not is_valid_ttl(content):
-                flash('Invalid TTL file format. Please provide a valid RDF receipt file.', category='danger')
+        if form.validate_on_submit():
+            f = form.receipt.data        
+            if f.filename == '':
+                flash('No selected file', category = 'danger')
                 return render_template('payment.html', form=form, cartContents=show, cart=cart, prices=prices, x=x)
+            
+            if not allowed_file(f.filename):
+                flash('Invalid file type. Only .ttl files are allowed.', category='danger')
+                return render_template('payment.html', form=form, cartContents=show, cart=cart, prices=prices, x=x)
+                
+            if f:
+                content = f.read()
+                if not is_valid_ttl(content):
+                    flash('Invalid TTL file format. Please provide a valid RDF receipt file.', category='danger')
+                    return render_template('payment.html', form=form, cartContents=show, cart=cart, prices=prices, x=x)
             
             is_valid, error_message = verify_receipt(content, cart, prices, current_user.username)
             if not is_valid:
@@ -371,8 +434,8 @@ def payment():
 
             return redirect(url_for('account', username= current_user.username))
         
-      return render_template('payment.html', form=form, cartContents=show, cart=cart, prices=prices,x=x)
-  
+        return render_template('payment.html', form=form, cartContents=show, cart=cart, prices=prices,x=x)
+
     else:
         flash('You must login before checkout', category='info')
         return redirect(url_for('login'))

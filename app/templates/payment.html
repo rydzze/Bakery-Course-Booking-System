@@ -620,10 +620,29 @@
 <div class='container'>
     <h1>Payment</h1>
     <br>
-    <p>Registration fee $20. Full payment pay when attending course.<p>
-      <div class='col-md-8'>
-        {% import 'bootstrap/wtf.html' as wtf %}
-        {{ wtf.quick_form(form) }}
+    <p>Registration fee $20. Full payment pay when attending course.</p>
+    <div class="row">
+      <div class="col-md-6">
+        <div class="panel panel-default">
+          <div class="panel-heading">
+            <h3 class="panel-title">1. Download Receipt Template</h3>
+          </div>
+          <div class="panel-body text-center">
+            <a href="{{ url_for('generate_receipt') }}" class="btn btn-primary">
+              <i class="fas fa-download"></i> Download TTL Receipt
+            </a>
+            <p class="help-block mt-2">Download the receipt template, then upload it in the next step.</p>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="panel panel-default">
+          <div class="panel-heading">
+            <h3 class="panel-title">2. Upload Receipt</h3>
+          </div>
+          <div class="panel-body">
+            {% import 'bootstrap/wtf.html' as wtf %}
+            {{ wtf.quick_form(form) }}
       </div>
   </div>
 </div>
