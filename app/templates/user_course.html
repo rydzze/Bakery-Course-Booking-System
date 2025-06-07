@@ -98,11 +98,11 @@
 <div style="font-size: 25px;margin-left: 20%;">
  <h4>Students</h4>
   {% for key, value in CourseMates.items() %}
-    {%for registerCourse in registerCourses:%}
-    {% if key == registerCourse.course %}
-      <p>{{key}}: {{value}}</p>
-  {% endif %}
-      {% endfor%}
+    {% for registerCourse in registerCourses %}
+      {% if key == registerCourse.course %}
+        <p>{{ key }}: {{ value | join(', ') }}</p>
+      {% endif %}
     {% endfor %}
+  {% endfor %}
   </div>  
 {% endblock %}
