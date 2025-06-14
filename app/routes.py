@@ -329,7 +329,7 @@ pb:buyer a pb:User ;
 """
             course_count += 1
 
-    ttl_content += f"""pb:receipt001 a pb:Receipt ;
+    ttl_content += f"""pb:buyerReceipt a pb:Receipt ;
     pb:issuedTo pb:buyer ;"""
 
     course_count = 1
